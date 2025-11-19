@@ -52,7 +52,7 @@ def list_mesh_entities(sim):
             if obj_type == 0:  # Shape type
                 shapes.append(obj_handle)
                 obj_name = sim.getObjectName(obj_handle)
-                print(f"  - {obj_name} (Handle: {obj_handle})")
+                # print(f"  - {obj_name} (Handle: {obj_handle})")
             
             index += 1
         
@@ -106,7 +106,7 @@ def find_robot(sim):
 
 
 def demonstrate_robot_movement(sim, robot_handle):
-    """Demonstrate moving the robot"""
+    """Demonstrate moving the robot and detect black line and blue wall"""
     try:
         print(f"\n=== Demonstrating Robot Movement ===")
         
@@ -118,48 +118,89 @@ def demonstrate_robot_movement(sim, robot_handle):
         orient = sim.getObjectOrientation(robot_handle, -1)
         print(f"Current orientation: {orient}")
         
-        # Move the robot forward (along X axis)
-        print("\nMoving robot in X direction...")
-        new_x = pos[0] + 0.5
-        sim.setObjectPosition(robot_handle, -1, [new_x, pos[1], pos[2]])
-        sim.step()
-        time.sleep(0.5)
+        # Check for proximity sensors (for front wall detection and black line detection)
+        print("\n=== Checking for Sensors ===")
+        front_sensor = find_sensor_by_name(sim, "front")
+        bottom_sensor = find_sensor_by_name(sim, "bottom")
         
-        # Get new position
-        new_pos = sim.getObjectPosition(robot_handle, -1)
-        print(f"New position: {new_pos}")
-        
-        # Move in Y direction
-        print("\nMoving robot in Y direction...")
-        new_y = pos[1] + 0.5
-        sim.setObjectPosition(robot_handle, -1, [new_x, new_y, pos[2]])
-        sim.step()
-        time.sleep(0.5)
-        
-        # Get position
-        new_pos = sim.getObjectPosition(robot_handle, -1)
-        print(f"New position: {new_pos}")
-        
-        # Rotate the robot
-        print("\nRotating robot...")
-        import math
-        new_orient = [orient[0], orient[1], orient[2] + math.pi / 4]  # 45 degree rotation
-        sim.setObjectOrientation(robot_handle, -1, new_orient)
-        sim.step()
-        time.sleep(0.5)
-        
-        # Return to original position
-        print("\nReturning robot to original position...")
-        sim.setObjectPosition(robot_handle, -1, pos)
-        sim.setObjectOrientation(robot_handle, -1, orient)
-        sim.step()
-        time.sleep(0.5)
-        
-        final_pos = sim.getObjectPosition(robot_handle, -1)
-        print(f"Final position (should match original): {final_pos}")
+        # Continuous sensor reading loop
+        print("\n=== Sensor Readings ===")
+        for i in range(2000):
+            sim.step()
+            
+            # Read front sensor (blue wall distance)
+            if front_sensor:
+                distance_front = read_proximity_sensor(sim, front_sensor)
+                if distance_front is not None:
+                    print(f"Frame {i}: Front sensor distance to blue wall: {distance_front:.3f} m")
+                else:
+                    print(f"Frame {i}: Front sensor - no detection")
+            
+            # Read bottom sensor (black line detection)
+            if bottom_sensor:
+                distance_bottom = read_proximity_sensor(sim, bottom_sensor)
+                if distance_bottom is not None:
+                    print(f"Frame {i}: Bottom sensor distance to black line: {distance_bottom:.3f} m")
+                    # Black line detection - if distance is very small
+                    if distance_bottom < 0.01:
+                        print(f"              *** BLACK LINE DETECTED ***")
+                else:
+                    print(f"Frame {i}: Bottom sensor - no black line detected")
+            
+            time.sleep(0.1)
         
     except Exception as e:
         print(f"Error demonstrating robot movement: {e}")
+
+
+def find_sensor_by_name(sim, sensor_type):
+    """Find a sensor by searching for objects containing the sensor type in their name"""
+    try:
+        index = 0
+        while True:
+            obj_handle = sim.getObjects(index, sim.handle_all)
+            if obj_handle == -1:
+                break
+            
+            obj_name = sim.getObjectName(obj_handle).lower()
+            obj_type = sim.getObjectType(obj_handle)
+            
+            # Type 5 is proximity sensor, type 4 is vision sensor
+            if (obj_type == 5 or obj_type == 4) and sensor_type in obj_name:
+                print(f"Found {sensor_type} sensor: {sim.getObjectName(obj_handle)} (Handle: {obj_handle})")
+                return obj_handle
+            
+            index += 1
+        
+        print(f"No {sensor_type} sensor found")
+        return None
+    except Exception as e:
+        print(f"Error finding {sensor_type} sensor: {e}")
+        return None
+
+
+def read_proximity_sensor(sim, sensor_handle):
+    """Read distance from proximity sensor"""
+    try:
+        # Get proximity sensor state
+        result = sim.checkProximitySensor(sensor_handle, sim.handle_all)
+        
+        # Result is [collision_state, distance, collision_point, ...]
+        if result and len(result) >= 2:
+            collision_state = result[0]
+            distance = result[1]
+            if collision_state:
+                return distance
+        
+        return None
+    except Exception as e:
+        # If checkProximitySensor fails, try alternative method
+        try:
+            # Try reading vision sensor
+            data = sim.getVisionSensorImage(sensor_handle)
+            return data
+        except:
+            return None
 
 
 def list_all_objects(sim):
