@@ -41,13 +41,19 @@ def main():
         pos = sim.getObjectPosition(robot_handle, -1)
         print(f"\nInitial position: X={pos[0]:.4f} Y={pos[1]:.4f} Z={pos[2]:.4f}")
         
-        print("\n=== Robot Control (Arrow Keys) ===")
+        print("\n=== Robot Control ===")
+        print("Arrow Keys: Move along X/Y axis")
         print("Up/Down arrows: Move along Y axis")
         print("Left/Right arrows: Move along X axis")
+        print("R: Rotate 90° left (counter-clockwise)")
+        print("Shift+R: Rotate 90° right (clockwise)")
         print("Press Ctrl+C to exit\n")
         
         # Enable raw input
         old_settings = enable_raw_input()
+        
+        # Track robot orientation (in radians, 0 = facing +X)
+        current_yaw = 0
         
         try:
             while True:
@@ -96,6 +102,42 @@ def main():
                                 print(f" | Front Sensor: no detection")
                         else:
                             print()
+                
+                elif char.lower() == 'r':  # Rotation keys
+                    is_shift = char.isupper()  # Check if uppercase (Shift+R)
+                    
+                    if is_shift:
+                        # Shift+R: rotate 90° right (clockwise)
+                        current_yaw -= math.pi / 2
+                        rotation_text = "Rotating 90° right (clockwise)"
+                    else:
+                        # R: rotate 90° left (counter-clockwise)
+                        current_yaw += math.pi / 2
+                        rotation_text = "Rotating 90° left (counter-clockwise)"
+                    
+                    # Normalize yaw to [-π, π]
+                    current_yaw = math.atan2(math.sin(current_yaw), math.cos(current_yaw))
+                    
+                    # Set robot orientation
+                    sim.setObjectOrientation(robot_handle, -1, [0, 0, current_yaw])
+                    sim.step()
+                    time.sleep(0.1)
+                    
+                    # Get position for display
+                    pos = sim.getObjectPosition(robot_handle, -1)
+                    print(f"{rotation_text}: ", end="")
+                    print(f"Position: X={pos[0]:7.4f} Y={pos[1]:7.4f} Z={pos[2]:7.4f}", end="")
+                    print(f" | Yaw: {math.degrees(current_yaw):6.1f}°", end="")
+                    
+                    # Read front sensor
+                    if front_sensor:
+                        distance = read_proximity_sensor(sim, front_sensor)
+                        if distance is not None:
+                            print(f" | Front Sensor: {distance:.4f}m")
+                        else:
+                            print(f" | Front Sensor: no detection")
+                    else:
+                        print()
                 
                 elif char == '\x03':  # Ctrl+C
                     print("\n\nControl stopped by user.")
