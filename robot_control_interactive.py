@@ -97,9 +97,10 @@ def main():
                         if front_sensor:
                             distance = read_proximity_sensor(sim, front_sensor)
                             if distance is not None:
-                                print(f" | Front Sensor: {distance:.4f}m")
+                                wall_status = "WALL" if is_wall_detected(distance) else "clear"
+                                print(f" | Front Sensor: {distance:.4f}m [{wall_status}]")
                             else:
-                                print(f" | Front Sensor: no detection")
+                                print(f" | Front Sensor: no detection [clear]")
                         else:
                             print()
                 
@@ -133,9 +134,10 @@ def main():
                     if front_sensor:
                         distance = read_proximity_sensor(sim, front_sensor)
                         if distance is not None:
-                            print(f" | Front Sensor: {distance:.4f}m")
+                            wall_status = "WALL" if is_wall_detected(distance) else "clear"
+                            print(f" | Front Sensor: {distance:.4f}m [{wall_status}]")
                         else:
-                            print(f" | Front Sensor: no detection")
+                            print(f" | Front Sensor: no detection [clear]")
                     else:
                         print()
                 
@@ -211,6 +213,11 @@ def read_proximity_sensor(sim, sensor_handle):
         return None
     except Exception as e:
         return None
+
+
+def is_wall_detected(distance):
+    """Check if a wall is detected based on sensor distance"""
+    return distance is not None and distance <= 0.5
 
 
 def enable_raw_input():
