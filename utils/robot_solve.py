@@ -15,27 +15,52 @@ class Direction(Enum):
 class RobotNavigator:
     """Manages robot movement with wall collision detection"""
     
-    def __init__(self, sim, robot_handle, map_grid, cell_size=2.0):
+    def __init__(self, sim, robot_handle, map_grid, sensor_handle, cell_size=2.0):
         self.sim = sim
         self.robot_handle = robot_handle
         self.map_grid = map_grid
+        self.sensor_handle = sensor_handle
         self.cell_size = cell_size
         self.grid_size = len(map_grid)
         self.current_pos = (0, 0)  # (y, x)
+    
+    def read_sensor_in_direction(self, direction: Direction) -> bool:
+        """Read sensor in specified direction and return True if wall detected"""
+        # Save current orientation
+        current_orient = self.sim.getObjectOrientation(self.robot_handle, -1)
+        
+        # Set orientation for the direction
+        direction_orientations = {
+            Direction.UP: [0, 0, math.pi/2],     # +Y
+            Direction.RIGHT: [0, 0, 0],          # +X
+            Direction.DOWN: [0, 0, -math.pi/2],  # -Y
+            Direction.LEFT: [0, 0, math.pi]      # -X
+        }
+        
+        self.sim.setObjectOrientation(self.robot_handle, -1, direction_orientations[direction])
+        self.sim.step()
+        time.sleep(0.05)
+        
+        # Read sensor
+        distance = read_proximity_sensor(self.sim, self.sensor_handle)
+        wall_detected = is_wall_detected(distance)
+        
+        # Restore orientation
+        self.sim.setObjectOrientation(self.robot_handle, -1, current_orient)
+        self.sim.step()
+        
+        return wall_detected
         
     def move(self, direction: Direction) -> bool:
         """
         Move robot one cell in the given direction.
+        Uses sensors to confirm no wall blocks movement.
         Returns True if successful, False if wall blocks movement.
         Raises ValueError if move would go out of bounds.
         """
         y, x = self.current_pos
         
-        # Check wall in this direction
-        if self.map_grid[y][x][direction.value]:
-            raise ValueError(f"Wall blocks movement {direction.name} from ({y},{x})")
-        
-        # Calculate new position
+        # Calculate new position first to check bounds
         if direction == Direction.UP:
             new_y, new_x = y + 1, x
         elif direction == Direction.RIGHT:
@@ -48,6 +73,10 @@ class RobotNavigator:
         # Check bounds
         if not (0 <= new_x < self.grid_size and 0 <= new_y < self.grid_size):
             raise ValueError(f"Movement would go out of bounds to ({new_y},{new_x})")
+        
+        # Use sensor to check for wall in movement direction
+        if self.read_sensor_in_direction(direction):
+            return False  # Wall detected, cannot move
         
         # Move robot
         cell_x = new_x * self.cell_size + 1
@@ -84,6 +113,79 @@ class RobotNavigator:
         self.sim.step()
         time.sleep(0.1)
         self.current_pos = (y, x)
+
+    def navigate_to(self, target_y, target_x):
+        """
+        Navigate to target cell using BFS pathfinding.
+        Returns True if navigation successful, False if path blocked or target unreachable.
+        """
+        start_y, start_x = self.current_pos
+        
+        # Check if already at target
+        if (start_y, start_x) == (target_y, target_x):
+            return True
+        
+        # Check if target is within bounds
+        if not (0 <= target_x < self.grid_size and 0 <= target_y < self.grid_size):
+            raise ValueError(f"Target ({target_y},{target_x}) out of bounds")
+        
+        # BFS to find shortest path
+        queue = deque([(start_y, start_x, [])])
+        visited = {(start_y, start_x)}
+        
+        while queue:
+            current_y, current_x, path = queue.popleft()
+            
+            # Check all four directions
+            for direction in Direction:
+                if direction == Direction.UP:
+                    next_y, next_x = current_y + 1, current_x
+                elif direction == Direction.RIGHT:
+                    next_y, next_x = current_y, current_x + 1
+                elif direction == Direction.DOWN:
+                    next_y, next_x = current_y - 1, current_x
+                elif direction == Direction.LEFT:
+                    next_y, next_x = current_y, current_x - 1
+                
+                # Check bounds
+                if not (0 <= next_x < self.grid_size and 0 <= next_y < self.grid_size):
+                    continue
+                    
+                # Skip if already visited
+                if (next_y, next_x) in visited:
+                    continue
+                
+                # Temporarily move to current cell to check if path is clear
+                original_pos = self.current_pos
+                self.set_position(current_y, current_x)
+                
+                # Check if we can move in this direction using sensors
+                can_move = not self.read_sensor_in_direction(direction)
+                
+                # Restore original position
+                self.set_position(original_pos[0], original_pos[1])
+                
+                if can_move:
+                    new_path = path + [direction]
+                    
+                    # Check if we reached the target
+                    if (next_y, next_x) == (target_y, target_x):
+                        # Execute the path
+                        for move_direction in new_path:
+                            if not self.move(move_direction):
+                                print(f"Path blocked during execution at {self.current_pos}")
+                                return False
+                        return True
+                    
+                    visited.add((next_y, next_x))
+                    queue.append((next_y, next_x, new_path))
+        
+        print(f"No path found from ({start_y},{start_x}) to ({target_y},{target_x})")
+        return False
+
+def navigate_to_global(navigator, x, y):
+    """Global navigate_to function for backward compatibility"""
+    return navigator.navigate_to(y, x)  # Note: swapped x,y to y,x for internal consistency
 
 def read_proximity_sensor(sim, sensor_handle, num_samples=1):
     """Read proximity sensor with multiple samples for reliability"""
@@ -176,7 +278,7 @@ def main():
     ]
 
     # Create navigator
-    navigator = RobotNavigator(sim, robot_handle, map_grid)
+    navigator = RobotNavigator(sim, robot_handle, map_grid, front_sensor)
     
     # Assume robot starts at (1,1) as cell center, cell size 2m x 2m
     cell_size = 2.0
@@ -192,7 +294,7 @@ def main():
             y, x = current_cell
             
             # Move robot to cell for scanning
-            navigator.set_position(y, x)
+            navigator.navigate_to(y, x)
             
             # Scan all 4 directions for walls
             for dir_name, wall_idx, yaw in directions:
@@ -228,6 +330,7 @@ def main():
                     if 0 <= nx < grid_size and 0 <= ny < grid_size and (ny, nx) not in visited:
                         visited.add((ny, nx))
                         stack.append((ny, nx))
+                        print(f"  Added cell ({ny},{nx}) to scan stack")
         
         print("\n✓ Maze scan complete!")
         display_map(map_grid)
