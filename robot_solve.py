@@ -3,8 +3,89 @@ import time
 import math
 from rich.table import Table
 from rich.console import Console
+from collections import deque
+from enum import Enum
 
-def read_proximity_sensor(sim, sensor_handle, num_samples=5):
+class Direction(Enum):
+    UP = 0      # +Y
+    RIGHT = 1   # +X
+    DOWN = 2    # -Y
+    LEFT = 3    # -X
+
+class RobotNavigator:
+    """Manages robot movement with wall collision detection"""
+    
+    def __init__(self, sim, robot_handle, map_grid, cell_size=2.0):
+        self.sim = sim
+        self.robot_handle = robot_handle
+        self.map_grid = map_grid
+        self.cell_size = cell_size
+        self.grid_size = len(map_grid)
+        self.current_pos = (0, 0)  # (y, x)
+        
+    def move(self, direction: Direction) -> bool:
+        """
+        Move robot one cell in the given direction.
+        Returns True if successful, False if wall blocks movement.
+        Raises ValueError if move would go out of bounds.
+        """
+        y, x = self.current_pos
+        
+        # Check wall in this direction
+        if self.map_grid[y][x][direction.value]:
+            raise ValueError(f"Wall blocks movement {direction.name} from ({y},{x})")
+        
+        # Calculate new position
+        if direction == Direction.UP:
+            new_y, new_x = y + 1, x
+        elif direction == Direction.RIGHT:
+            new_y, new_x = y, x + 1
+        elif direction == Direction.DOWN:
+            new_y, new_x = y - 1, x
+        elif direction == Direction.LEFT:
+            new_y, new_x = y, x - 1
+        
+        # Check bounds
+        if not (0 <= new_x < self.grid_size and 0 <= new_y < self.grid_size):
+            raise ValueError(f"Movement would go out of bounds to ({new_y},{new_x})")
+        
+        # Move robot
+        cell_x = new_x * self.cell_size + 1
+        cell_y = new_y * self.cell_size + 1
+        self.sim.setObjectPosition(self.robot_handle, -1, [cell_x, cell_y, 0.138])
+        self.sim.step()
+        time.sleep(0.1)
+        
+        self.current_pos = (new_y, new_x)
+        return True
+    
+    def get_position(self):
+        """Get current cell position (y, x)"""
+        return self.current_pos
+    
+    def get_accessible_directions(self) -> list:
+        """Get list of directions with no walls"""
+        y, x = self.current_pos
+        accessible = []
+        for direction in Direction:
+            if not self.map_grid[y][x][direction.value]:
+                accessible.append(direction)
+        return accessible
+    
+    def set_position(self, y, x):
+        """Teleport robot to cell (y, x) for scanning - bypasses wall checks"""
+        if not (0 <= x < self.grid_size and 0 <= y < self.grid_size):
+            raise ValueError(f"Position ({y},{x}) out of bounds")
+        
+        cell_x = x * self.cell_size + 1
+        cell_y = y * self.cell_size + 1
+        self.sim.setObjectPosition(self.robot_handle, -1, [cell_x, cell_y, 0.138])
+        self.sim.setObjectOrientation(self.robot_handle, -1, [0, 0, 0])
+        self.sim.step()
+        time.sleep(0.1)
+        self.current_pos = (y, x)
+
+def read_proximity_sensor(sim, sensor_handle, num_samples=1):
     """Read proximity sensor with multiple samples for reliability"""
     try:
         distances = []
@@ -16,7 +97,6 @@ def read_proximity_sensor(sim, sensor_handle, num_samples=5):
                 if collision_state:
                     distances.append(distance)
             sim.step()
-            time.sleep(0.02)
         
         # Return median distance if we have readings
         if distances:
@@ -95,44 +175,65 @@ def main():
         ("Left (-X)",  3, math.pi)        # Index 3: Left wall - face -X
     ]
 
+    # Create navigator
+    navigator = RobotNavigator(sim, robot_handle, map_grid)
+    
     # Assume robot starts at (1,1) as cell center, cell size 2m x 2m
     cell_size = 2.0
-    start_pos = (0, 0)
-    current_pos = list(start_pos)
-    current_yaw = 0
+    start_cell = (0, 0)  # cell (0,0)
+    visited = set([start_cell])
+    stack = [start_cell]
     cells_scanned = 0
-    total_cells = grid_size * grid_size
 
     print("\nScanning maze...")
     try:
-        for y in range(grid_size):
-            for x in range(grid_size):
-                current_pos = [y, x]
-                # Move robot to cell (x, y)
-                # Center of cell: (x+1, y+1) * cell_size
-                cell_x = x * cell_size + 1
-                cell_y = y * cell_size + 1
-                sim.setObjectPosition(robot_handle, -1, [cell_x, cell_y, 0.138])
-                sim.setObjectOrientation(robot_handle, -1, [0, 0, 0])
+        while stack:
+            current_cell = stack.pop()
+            y, x = current_cell
+            
+            # Move robot to cell for scanning
+            navigator.set_position(y, x)
+            
+            # Scan all 4 directions for walls
+            for dir_name, wall_idx, yaw in directions:
+                sim.setObjectOrientation(robot_handle, -1, [0, 0, yaw])
                 sim.step()
-                time.sleep(0.1)
+                dist = read_proximity_sensor(sim, front_sensor)
+                wall = is_wall_detected(dist)
+                map_grid[y][x][wall_idx] = wall
+            
+            cells_scanned += 1
+            print(f"Scanned cell ({y},{x})")
+            display_map(map_grid)
+            input()
 
-                # Scan all 4 directions for walls
-                for dir_name, wall_idx, yaw in directions:
-                    sim.setObjectOrientation(robot_handle, -1, [0, 0, yaw])
-                    sim.step()
-                    time.sleep(0.05)
-                    dist = read_proximity_sensor(sim, front_sensor)
-                    wall = is_wall_detected(dist)
-                    map_grid[y][x][wall_idx] = wall
-                cells_scanned += 1
-                display_map(map_grid)
-                print(f"Scanned cell ({y},{x})")
+            # Add accessible neighbors to stack
+            neighbor_moves = [
+                (Direction.UP, 0),      # wall_idx=0
+                (Direction.RIGHT, 1),   # wall_idx=1
+                (Direction.DOWN, 2),    # wall_idx=2
+                (Direction.LEFT, 3)     # wall_idx=3
+            ]
+            for direction, wall_idx in neighbor_moves:
+                if not map_grid[y][x][wall_idx]:  # no wall in this direction
+                    if direction == Direction.UP:
+                        ny, nx = y + 1, x
+                    elif direction == Direction.RIGHT:
+                        ny, nx = y, x + 1
+                    elif direction == Direction.DOWN:
+                        ny, nx = y - 1, x
+                    else:  # LEFT
+                        ny, nx = y, x - 1
+                    
+                    if 0 <= nx < grid_size and 0 <= ny < grid_size and (ny, nx) not in visited:
+                        visited.add((ny, nx))
+                        stack.append((ny, nx))
+        
         print("\n✓ Maze scan complete!")
         display_map(map_grid)
     except KeyboardInterrupt:
         print("\n\n✗ Scan interrupted by user")
-        print(f"Partial results: {cells_scanned}/{total_cells} cells scanned")
+        print(f"Partial results: {cells_scanned} cells scanned")
         display_map(map_grid)
     except Exception as e:
         print(f"\n✗ Unexpected error: {e}")
