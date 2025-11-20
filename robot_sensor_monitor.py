@@ -19,9 +19,12 @@ def main():
     try:
         # Find the robot
         print("Finding robot...")
-        robot_handle = find_robot(sim)
+        try:
+            robot_handle = sim.getObject('/BubbleRobot')
+        except Exception:
+            robot_handle = -1
         
-        if not robot_handle:
+        if robot_handle == -1:
             print("No robot found in the scene!")
             return
         
@@ -82,48 +85,22 @@ def main():
 def find_robot(sim):
     """Find the robot in the scene"""
     try:
-        index = 0
-        while True:
-            obj_handle = sim.getObjects(index, sim.handle_all)
-            if obj_handle == -1:
-                break
-            
-            obj_name = sim.getObjectName(obj_handle).lower()
-            if 'robot' in obj_name or 'youbot' in obj_name:
-                return obj_handle
-            
-            index += 1
-        
-        return None
+        return sim.getObject('/BubbleRobot')
     except Exception as e:
         print(f"Error finding robot: {e}")
-        return None
+        return -1
 
 
 def find_all_sensors(sim):
     """Find all proximity and vision sensors in the scene"""
     sensors = {}
     try:
-        index = 0
-        while True:
-            obj_handle = sim.getObjects(index, sim.handle_all)
-            if obj_handle == -1:
-                break
-            
-            obj_name = sim.getObjectName(obj_handle)
-            obj_type = sim.getObjectType(obj_handle)
-            
-            # Type 4 is vision sensor, Type 5 is proximity sensor
-            # Only keep front sensor
-            if (obj_type == 4 or obj_type == 5) and 'front' in obj_name.lower():
-                sensors[obj_name] = obj_handle
-            
-            index += 1
-        
-        return sensors
+        sensor_handle = sim.getObject('./SensingNose')
+        if sensor_handle != -1:
+            sensors['SensingNose'] = sensor_handle
     except Exception as e:
         print(f"Error finding sensors: {e}")
-        return {}
+    return sensors
 
 
 def read_all_sensors(sim, sensors):

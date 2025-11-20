@@ -15,7 +15,7 @@ def read_proximity_sensor(sim, sensor_handle):
         return None
 
 def is_wall_detected(distance):
-    return distance is not None and distance <= 0.6
+    return distance is not None and distance <= 1.1
 
 def display_map(map_grid):
     # Print top border
@@ -57,35 +57,29 @@ def main():
         return
     sim = client.getObject('sim')
     # Find robot
-    robot_handle = None
-    index = 0
-    while True:
-        obj_handle = sim.getObjects(index, sim.handle_all)
-        if obj_handle == -1:
-            break
-        obj_name = sim.getObjectName(obj_handle).lower()
-        if 'robot' in obj_name or 'youbot' in obj_name:
-            robot_handle = obj_handle
-            break
-        index += 1
-    if not robot_handle:
+    try:
+        robot_handle = sim.getObject('/BubbleRobot')
+    except Exception:
+        robot_handle = -1
+
+    if robot_handle == -1:
         print("No robot found!")
         return
-    # Find front sensor
-    front_sensor = None
-    index = 0
-    while True:
-        obj_handle = sim.getObjects(index, sim.handle_all)
-        if obj_handle == -1:
-            break
-        obj_name = sim.getObjectName(obj_handle).lower()
-        obj_type = sim.getObjectType(obj_handle)
-        if (obj_type == 4 or obj_type == 5) and 'front' in obj_name:
-            front_sensor = obj_handle
-            break
-        index += 1
-    if not front_sensor:
+
+    # Find motors and sensors
+    try:
+        front_sensor = sim.getObject('./SensingNose')
+        left_motor = sim.getObject('./LeftMotor')
+        right_motor = sim.getObject('./RightMotor')
+    except Exception as e:
+        print(f"Error getting handles: {e}")
+        return
+
+    if front_sensor == -1:
         print("No front sensor found!")
+        return
+    if left_motor == -1 or right_motor == -1:
+        print("Motors not found!")
         return
     # Map: 8x8 grid, each cell [up, right, down, left] (bools)
     map_grid = [[[False, False, False, False] for _ in range(8)] for _ in range(8)]
@@ -102,7 +96,7 @@ def main():
             # Move robot to cell center
             cell_x = x * 2 + 1
             cell_y = y * 2 + 1
-            sim.setObjectPosition(robot_handle, -1, [cell_x, cell_y, 0])
+            sim.setObjectPosition(robot_handle, -1, [cell_x, cell_y, 0.1])
             sim.setObjectOrientation(robot_handle, -1, [0, 0, 0])
             sim.step()
             time.sleep(0.2)
