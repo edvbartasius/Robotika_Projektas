@@ -19,20 +19,22 @@ def main():
     sim = client.getObject('sim')
     
     try:
-        # Find the robot
-        print("Finding robot...")
-        robot_handle = find_robot(sim)
-        
-        if not robot_handle:
+        # Find the robot and sensor
+        print("Finding robot and sensor...")
+        try:
+            robot_handle = sim.getObject('/BubbleRobot')
+            front_sensor = sim.getObject('./SensingNose')
+        except Exception as e:
+            print(f"Error getting object handles: {e}")
+            return
+
+        if robot_handle == -1:
             print("No robot found in the scene!")
             return
         
         print(f"Robot found: Handle {robot_handle}")
         
-        # Find front sensor
-        print("Finding front sensor...")
-        front_sensor = find_front_sensor(sim)
-        if front_sensor:
+        if front_sensor != -1:
             print(f"Front sensor found: Handle {front_sensor}")
         else:
             print("No front sensor found (will continue without it)")
@@ -217,7 +219,7 @@ def read_proximity_sensor(sim, sensor_handle):
 
 def is_wall_detected(distance):
     """Check if a wall is detected based on sensor distance"""
-    return distance is not None and distance <= 0.5
+    return distance is not None and distance <= 1.1
 
 
 def enable_raw_input():
