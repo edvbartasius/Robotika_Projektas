@@ -187,14 +187,21 @@ function sysCall_actuation()
     -- STATE: SEARCHING
     -------------------------
     elseif fsm:is('searching') then
-        -- Spin right to find line
-        leftV = speed * 0.4
-        rightV = -speed * 0.4
-        
-        if lineDetected then
-            fsm:line_found()
-        elseif phaseTime > 2.0 then
-            fsm:search_timeout()
+        -- Check for obstacles even while searching
+        if obstacleDetected then
+            fsm:obstacle_detected()
+            -- Set motor values for transition frame
+            leftV, rightV = -speed * 0.5, speed * 0.5
+        else
+            -- Spin right to find line
+            leftV = speed * 0.4
+            rightV = -speed * 0.4
+            
+            if lineDetected then
+                fsm:line_found()
+            elseif phaseTime > 2.0 then
+                fsm:search_timeout()
+            end
         end
     end
     
