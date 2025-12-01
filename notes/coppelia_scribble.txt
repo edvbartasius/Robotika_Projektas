@@ -2,3 +2,30 @@
 offset 0.005
 range 0.05
 radius 0.1
+
+
+
+    -- Robot geometry parameters (BubbleRob specifications)
+    -- Body: sphere with diameter 0.2m
+    bodyDiameter = 0.2
+    bodyRadius = 0.1
+    
+    -- Wheels: cylinders with diameter 0.08m, thickness 0.02m
+    wheelDiameter = 0.08
+    wheelRadius = 0.04
+    wheelThickness = 0.02
+    
+    -- Wheel positions: Y-offset 0.1m each (total 0.2m between wheels)
+    wheelYOffset = 0.1
+    wheelDistanceBetween = 0.2  -- Distance between wheel centers
+    
+    -- Slider: sphere with diameter 0.05m
+    sliderDiameter = 0.05
+    sliderRadius = 0.025
+    
+    -- Distance from body center to wheel center (used for turning radius)
+    bodyDistanceToWheel = wheelYOffset
+    
+    -- Turning parameters
+    turnSpeed = 0.1  -- Linear speed at wheel during turning (m/s)
+    
