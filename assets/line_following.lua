@@ -29,22 +29,39 @@ function sysCall_init()
     minMaxSpeed = { 50 * math.pi / 180, 300 * math.pi / 180 }
     speed = (minMaxSpeed[1] + minMaxSpeed[2]) * 0.5
     
-    -- Obstacle avoidance state
-    avoidingObstacle = false
-    avoidancePhase = 0  -- 0: not avoiding, 1: turn left, 2: go forward, 3: turn right, 4: find line
-    avoidanceStartTime = 0
-    avoidancePhaseDuration = { 0.5, 0.8, 0.5, 1.0 }  -- Duration for each phase
+    -- Timing
+    phaseStartTime = 0
     
-    -- UI
-    xml = '<ui title="Speed" closeable="false" resizeable="false" activate="false">' .. [[
-                <hslider minimum="0" maximum="100" on-change="speedChange_callback" id="1"/>
-            <label text="" style="* {margin-left: 300px;}"/>
-        </ui>
-        ]]
-    ui = simUI.create(xml)
-    simUI.setSliderValue(ui, 1, 100 * (speed - minMaxSpeed[1]) / (minMaxSpeed[2] - minMaxSpeed[1]))
-end
-
+    -- State machine
+    fsm = machine.create({
+        initial = 'following',
+        events = {
+            { name = 'obstacle_detected', from = 'following',    to = 'turning_away' },
+            { name = 'front_clear',       from = 'turning_away', to = 'wall_follow' },
+            { name = 'line_found',        from = 'wall_follow',  to = 'following' },
+            { name = 'timeout',           from = 'wall_follow',  to = 'searching' },
+            { name = 'line_found',        from = 'searching',    to = 'following' },
+            { name = 'search_timeout',    from = 'searching',    to = 'wall_follow' }
+        },
+        callbacks = {
+            onturning_away = function() 
+                phaseStartTime = sim.getSimulationTime()
+                print(">>> STATE: Turning away from obstacle") 
+            end,
+            onwall_follow = function() 
+                phaseStartTime = sim.getSimulationTime()
+                print(">>> STATE: Wall following") 
+            end,
+            onsearching = function() 
+                phaseStartTime = sim.getSimulationTime()
+                print(">>> STATE: Searching for line") 
+            end,
+            onfollowing = function() 
+                print(">>> STATE: Following line") 
+            end
+        }
+    })
+    
 --[=====[
   #####  ######     #    ######  #     #
  #     # #     #   # #   #     # #     #
@@ -55,6 +72,16 @@ end
   #####  #     # #     # #       #     #
 
 --]=====]
+    xml = '<ui title="Speed" closeable="false" resizeable="false" activate="false">' .. [[
+                <hslider minimum="0" maximum="100" on-change="speedChange_callback" id="1"/>
+            <label text="" style="* {margin-left: 300px;}"/>
+        </ui>
+        ]]
+    ui = simUI.create(xml)
+    simUI.setSliderValue(ui, 1, 100 * (speed - minMaxSpeed[1]) / (minMaxSpeed[2] - minMaxSpeed[1]))
+end
+
+
 function sysCall_sensing()
     local p = sim.getObjectPosition(bubbleRobBase, -1)
     sim.addDrawingObjectItem(robotTrace, p)
@@ -72,8 +99,9 @@ end
 --]=====]
 function sysCall_actuation()
     local currentTime = sim.getSimulationTime()
-    
-    -- Read proximity sensors for obstacles
+    local phaseTime = currentTime - phaseStartTime
+        
+    -- Read proximity sensors
     local noseDetected = sim.readProximitySensor(noseSensor) > 0
     local frontLeftDetected = sim.readProximitySensor(frontLeftSensor) > 0
     local frontRightDetected = sim.readProximitySensor(frontRightSensor) > 0
@@ -90,92 +118,83 @@ function sysCall_actuation()
     result, data = sim.readVisionSensor(floorSensorHandles[3])
     if result >= 0 then right = data[11] < 0.5 end
     
-    local leftV, rightV
+    local lineDetected = middle or left or right
+    local leftV, rightV = 0, 0  -- Default to stopped
     
-    -- Check for obstacle - start avoidance
-    if obstacleDetected and not avoidingObstacle then
-        avoidingObstacle = true
-        avoidancePhase = 1
-        avoidanceStartTime = currentTime
-        print(">>> Obstacle detected! Starting avoidance...")
-    end
-    
-    if avoidingObstacle then
-        -- Smart obstacle avoidance using front sensors
-        local phaseTime = currentTime - avoidanceStartTime
-        
-        if avoidancePhase == 1 then
-            -- Phase 1: Turn left until front is clear
-            leftV = -speed * 0.5
-            rightV = speed * 0.5
-            if not noseDetected and not frontRightDetected and phaseTime > 0.3 then
-                avoidancePhase = 2
-                avoidanceStartTime = currentTime
-                print(">>> Avoidance phase 2: Wall follow")
-            end
-        elseif avoidancePhase == 2 then
-            -- Phase 2: Wall follow - keep obstacle on right side
-            if frontRightDetected or noseDetected then
-                -- Obstacle still on right or ahead - turn left
-                leftV = speed * 0.3
-                rightV = speed * 0.6
-            elseif frontLeftDetected then
-                -- Something on left - turn right
-                leftV = speed * 0.6
-                rightV = speed * 0.3
+    -------------------------
+    -- STATE: FOLLOWING
+    -------------------------
+    if fsm:is('following') then
+        if obstacleDetected then
+            fsm:obstacle_detected()
+            -- Set motor values for transition frame
+            leftV, rightV = -speed * 0.5, speed * 0.5
+        else
+            -- Line following with RIGHT priority
+            if middle then
+                if right then
+                    leftV, rightV = speed, speed * 0.1
+                elseif left then
+                    leftV, rightV = speed, speed * 0.8
+                else
+                    leftV, rightV = speed, speed
+                end
+            elseif right then
+                leftV, rightV = speed, 0
+            elseif left then
+                leftV, rightV = 0, speed
             else
-                -- Clear ahead - go forward and slight right to stay near wall
-                leftV = speed * 0.7
-                rightV = speed * 0.5
-            end
-            
-            -- Check if we found the line (and obstacle is clear)
-            if (middle or left or right) and not obstacleDetected then
-                avoidingObstacle = false
-                avoidancePhase = 0
-                print(">>> Line found! Resuming normal operation.")
-            elseif phaseTime > 3.0 then
-                -- Timeout - switch to search mode
-                avoidancePhase = 3
-                avoidanceStartTime = currentTime
-                print(">>> Avoidance timeout - searching for line")
-            end
-        elseif avoidancePhase == 3 then
-            -- Phase 3: Search for line by turning right
-            leftV = speed * 0.4
-            rightV = -speed * 0.4
-            if middle or left or right then
-                avoidingObstacle = false
-                avoidancePhase = 0
-                print(">>> Line found! Resuming normal operation.")
-            elseif phaseTime > 2.0 then
-                -- Reset and try again
-                avoidancePhase = 2
-                avoidanceStartTime = currentTime
+                -- Line lost - spin right
+                leftV, rightV = speed * 0.4, -speed * 0.4
             end
         end
-    else
-        -- Normal line following with RIGHT priority
-        if middle then
-            if right then
-                leftV = speed
-                rightV = speed * 0.1
-            elseif left then
-                leftV = speed
-                rightV = speed * 0.8
-            else
-                leftV = speed
-                rightV = speed
-            end
-        elseif right then
-            leftV = speed
-            rightV = speed * 0.0
-        elseif left then
-            leftV = speed * 0.0
-            rightV = speed
+    
+    -------------------------
+    -- STATE: TURNING AWAY
+    -------------------------
+    elseif fsm:is('turning_away') then
+        -- Turn left until front is clear
+        leftV = -speed * 0.5
+        rightV = speed * 0.5
+        
+        if not noseDetected and not frontRightDetected and phaseTime > 0.3 then
+            fsm:front_clear()
+        end
+    
+    -------------------------
+    -- STATE: WALL FOLLOW
+    -------------------------
+    elseif fsm:is('wall_follow') then
+        if frontRightDetected or noseDetected then
+            -- Obstacle on right or ahead - turn left
+            leftV, rightV = speed * 0.3, speed * 0.6
+        elseif frontLeftDetected then
+            -- Obstacle on left - turn right
+            leftV, rightV = speed * 0.6, speed * 0.3
         else
-            leftV = speed * 0.4
-            rightV = -speed * 0.4
+            -- Clear - go forward with slight right drift
+            leftV, rightV = speed * 0.7, speed * 0.5
+        end
+        
+        -- Transitions
+        if lineDetected and not obstacleDetected then
+            fsm:line_found()
+        elseif phaseTime > 3.0 then
+            fsm:timeout()
+        end
+    
+    -------------------------
+    -- STATE: SEARCHING
+    -------------------------
+    elseif fsm:is('searching') then
+        -- Spin right to find line
+        leftV = speed * 0.4
+        rightV = -speed * 0.4
+        
+        if lineDetected then
+            fsm:line_found()
+        elseif phaseTime > 2.0 then
+            fsm:search_timeout()
         end
     end
     
