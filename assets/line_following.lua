@@ -1,15 +1,39 @@
+-- Load FSM library
+local machine = require("statemachine")
+
 function sysCall_init()
     bubbleRobBase=sim.getObject('.')
     leftMotor=sim.getObject("./leftMotor")
     rightMotor=sim.getObject("./rightMotor")
     noseSensor=sim.getObject("./sensingNose")
     minMaxSpeed={50*math.pi/180,300*math.pi/180}
-    backUntilTime=-1 -- Tells whether bubbleRob is in forward or backward mode
     floorSensorHandles={-1,-1,-1}
     floorSensorHandles[1]=sim.getObject("./leftSensor")
     floorSensorHandles[2]=sim.getObject("./middleSensor")
     floorSensorHandles[3]=sim.getObject("./rightSensor")
     robotTrace=sim.addDrawingObject(sim.drawing_linestrip+sim.drawing_cyclic,2,0,-1,200,{1,1,0},nil,nil,{1,1,0})
+    
+    ignoreUntilTime = -1
+    currentTime = 0
+    
+    -- Create FSM
+    fsm = machine.create({
+        initial = 'following',
+        events = {
+            { name = 'detect_both', from = 'following', to = 'ignoring' },
+            { name = 'timer_expired', from = 'ignoring', to = 'following' }
+        },
+        callbacks = {
+            onenterignoring = function()
+                print(">>> Transition to IGNORING (both sensors detected)")
+                ignoreUntilTime = currentTime + 5
+            end,
+            onenterfollowing = function()
+                print(">>> Transition to FOLLOWING (timer expired)")
+            end
+        }
+    })
+    
     -- Create the custom UI:
     xml = '<ui title="'..sim.getObjectAlias(bubbleRobBase,1)..' speed" closeable="false" resizeable="false" activate="false">'..[[
                 <hslider minimum="0" maximum="100" on-change="speedChange_callback" id="1"/>
@@ -32,8 +56,8 @@ function speedChange_callback(ui,id,newVal)
 end
 
 function sysCall_actuation() 
+    currentTime = sim.getSimulationTime()
     result=sim.readProximitySensor(noseSensor)
-    if (result>0) then backUntilTime=sim.getSimulationTime()+4 end
     
     -- read the line detection sensors:
     sensorReading={false,false,false}
@@ -43,30 +67,51 @@ function sysCall_actuation()
             sensorReading[i]=(data[11]<0.5) -- data[11] is the average of intensity of the image
         end
     end
-    print(sensorReading[1],sensorReading[2],sensorReading[3])
+
+    -- FSM Logic - State transitions
+    if fsm:is('following') then
+        if sensorReading[1] and sensorReading[3] then
+            -- Both left and right sensors detect line
+            fsm:detect_both()
+        end
+    elseif fsm:is('ignoring') then
+        if ignoreUntilTime <= currentTime then
+            fsm:timer_expired()
+        else
+            print(">>> Ignoring sensors for " .. string.format("%.1f", ignoreUntilTime - currentTime) .. " more seconds")
+        end
+    end
     
-    -- compute left and right velocities to follow the detected line:
-    rightV=speed
-    leftV=speed
-    if sensorReading[1] then
-        leftV=0.03*speed
-    end
-    if sensorReading[3] then
-        rightV=0.03*speed
-    end
-    if sensorReading[1] and sensorReading[3] then
-        backUntilTime=sim.getSimulationTime()+2
-    end
+    -- Initialize motor velocities
+    local leftV = 0
+    local rightV = 0
     
-    if (backUntilTime<sim.getSimulationTime()) then
-        -- When in forward mode, we simply move forward at the desired speed
-        sim.setJointTargetVelocity(leftMotor,leftV)
-        sim.setJointTargetVelocity(rightMotor,rightV)
-    else
-        -- When in backward mode, we simply backup in a curve at reduced speed
-        sim.setJointTargetVelocity(leftMotor,-speed/2)
-        sim.setJointTargetVelocity(rightMotor,-speed/8)
+    -- State actions
+    if fsm:is('following') then
+        print("[FOLLOWING] Sensors: L=" .. tostring(sensorReading[1]) .. " M=" .. tostring(sensorReading[2]) .. " R=" .. tostring(sensorReading[3]))
+        
+        -- Line following control
+        leftV = speed
+        rightV = speed
+        
+        if sensorReading[1] then
+            leftV = speed * 0.5
+            print("  - Slowing left motor")
+        end
+        if sensorReading[3] then
+            rightV = speed * 0.5
+            print("  - Slowing right motor")
+        end
+        
+    elseif fsm:is('ignoring') then
+        print("[IGNORING] Moving forward at full speed")
+        leftV = speed
+        rightV = speed
     end
+
+    -- Apply motor velocities
+    sim.setJointTargetVelocity(leftMotor,leftV)
+    sim.setJointTargetVelocity(rightMotor,rightV)
 end 
 
 function sysCall_cleanup() 
