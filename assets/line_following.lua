@@ -1,7 +1,16 @@
--- Load FSM library
 local machine = require("statemachine")
 
 function sysCall_init()
+--[=====[
+ ######     #    ######  #######  #####  
+ #     #   # #   #     #    #    #     # 
+ #     #  #   #  #     #    #    #       
+ ######  #     # ######     #     #####  
+ #       ####### #   #      #          # 
+ #       #     # #    #     #    #     # 
+ #       #     # #     #    #     #####  
+                                         
+--]=====]
     bubbleRobBase=sim.getObject('.')
     leftMotor=sim.getObject("./leftMotor")
     rightMotor=sim.getObject("./rightMotor")
@@ -13,20 +22,64 @@ function sysCall_init()
     floorSensorHandles[3]=sim.getObject("./rightSensor")
     robotTrace=sim.addDrawingObject(sim.drawing_linestrip+sim.drawing_cyclic,2,0,-1,200,{1,1,0},nil,nil,{1,1,0})
     
+
+    --[=====[
+ ######     #    ######     #    #     # ####### ####### ####### ######   #####  
+ #     #   # #   #     #   # #   ##   ## #          #    #       #     # #     # 
+ #     #  #   #  #     #  #   #  # # # # #          #    #       #     # #       
+ ######  #     # ######  #     # #  #  # #####      #    #####   ######   #####  
+ #       ####### #   #   ####### #     # #          #    #       #   #         # 
+ #       #     # #    #  #     # #     # #          #    #       #    #  #     # 
+ #       #     # #     # #     # #     # #######    #    ####### #     #  #####  
+                                                                                 
+    --]=====]
+    -- Robot control parameters
     ignoreUntilTime = -1
     currentTime = 0
+    lastTurnTime = 0
     
-    -- Create FSM
+    -- Robot geometry parameters
+    wheelRadius = 0.04
+    bodyDistanceToWheel = 0.1
+    turnSpeed = 0.05
+    
+    -- Precompute turn parameters
+    local cellSize = 2
+    local wL = -turnSpeed / wheelRadius
+    local wR = turnSpeed / wheelRadius
+    local minTurnTime = (bodyDistanceToWheel * math.pi / 2) / turnSpeed
+    precomputedTurnL = wL
+    precomputedTurnR = wR
+    precomputedTurnDuration = minTurnTime
+    
+    print("Turn parameters - wL: " .. wL .. ", wR: " .. wR .. ", duration: " .. minTurnTime .. "s")
+    
+
+    --[=====[
+ #######  #####  #     # 
+ #       #     # ##   ## 
+ #       #       # # # # 
+ #####    #####  #  #  # 
+ #             # #     # 
+ #       #     # #     # 
+ #        #####  #     # 
+                         
+    --]=====]
     fsm = machine.create({
         initial = 'following',
         events = {
-            { name = 'detect_both', from = 'following', to = 'ignoring' },
+            { name = 'detect_both', from = 'following', to = 'turning' },
+            { name = 'turn_complete', from = 'turning', to = 'ignoring' },
             { name = 'timer_expired', from = 'ignoring', to = 'following' }
         },
         callbacks = {
+            onenterturning = function()
+                print(">>> Transition to TURNING (both sensors detected)")
+                lastTurnTime = currentTime
+            end,
             onenterignoring = function()
-                print(">>> Transition to IGNORING (both sensors detected)")
-                ignoreUntilTime = currentTime + 5
+                print(">>> Transition to IGNORING (turn complete)")
+                ignoreUntilTime = currentTime + 1
             end,
             onenterfollowing = function()
                 print(">>> Transition to FOLLOWING (timer expired)")
@@ -34,7 +87,16 @@ function sysCall_init()
         }
     })
     
-    -- Create the custom UI:
+    --[=====[
+ #     # ### 
+ #     #  #  
+ #     #  #  
+ #     #  #  
+ #     #  #  
+ #     #  #  
+  #####  ### 
+             
+    --]=====]
     xml = '<ui title="'..sim.getObjectAlias(bubbleRobBase,1)..' speed" closeable="false" resizeable="false" activate="false">'..[[
                 <hslider minimum="0" maximum="100" on-change="speedChange_callback" id="1"/>
             <label text="" style="* {margin-left: 300px;}"/>
@@ -46,15 +108,33 @@ function sysCall_init()
     
 end
 
+--[=====[
+  #####  ######     #    ######  #     # 
+ #     # #     #   # #   #     # #     # 
+ #       #     #  #   #  #     # #     # 
+ #  #### ######  #     # ######  ####### 
+ #     # #   #   ####### #       #     # 
+ #     # #    #  #     # #       #     # 
+  #####  #     # #     # #       #     # 
+                                         
+--]=====]
 function sysCall_sensing()
     local p=sim.getObjectPosition(bubbleRobBase,-1)
     sim.addDrawingObjectItem(robotTrace,p)
 end 
 
-function speedChange_callback(ui,id,newVal)
-    speed=minMaxSpeed[1]+(minMaxSpeed[2]-minMaxSpeed[1])*newVal/100
-end
 
+
+--[=====[
+ #     #    #    ### #     # 
+ ##   ##   # #    #  ##    # 
+ # # # #  #   #   #  # #   # 
+ #  #  # #     #  #  #  #  # 
+ #     # #######  #  #   # # 
+ #     # #     #  #  #    ## 
+ #     # #     # ### #     # 
+                             
+--]=====]
 function sysCall_actuation() 
     currentTime = sim.getSimulationTime()
     result=sim.readProximitySensor(noseSensor)
@@ -68,11 +148,28 @@ function sysCall_actuation()
         end
     end
 
-    -- FSM Logic - State transitions
+    --[=====[
+  #####  #######    #    ####### #######    ####### ######     #    #     #  #####  ### ####### ### ####### #     #  #####  
+ #     #    #      # #      #    #             #    #     #   # #   ##    # #     #  #     #     #  #     # ##    # #     # 
+ #          #     #   #     #    #             #    #     #  #   #  # #   # #        #     #     #  #     # # #   # #       
+  #####     #    #     #    #    #####         #    ######  #     # #  #  #  #####   #     #     #  #     # #  #  #  #####  
+       #    #    #######    #    #             #    #   #   ####### #   # #       #  #     #     #  #     # #   # #       # 
+ #     #    #    #     #    #    #             #    #    #  #     # #    ## #     #  #     #     #  #     # #    ## #     # 
+  #####     #    #     #    #    #######       #    #     # #     # #     #  #####  ###    #    ### ####### #     #  #####  
+                                                                                                                            
+    --]=====]
     if fsm:is('following') then
         if sensorReading[1] and sensorReading[3] then
-            -- Both left and right sensors detect line
+            -- Both left and right sensors detect line - start turning
             fsm:detect_both()
+        end
+    elseif fsm:is('turning') then
+        -- Check if turn is complete based on timer
+        local timeElapsed = currentTime - lastTurnTime
+        print(string.format("[TURNING] Elapsed: %.3f / Duration: %.3f (%.1f%%)", timeElapsed, precomputedTurnDuration, (timeElapsed / precomputedTurnDuration * 100)))
+        if timeElapsed > precomputedTurnDuration then
+            print(">>> Turn complete!")
+            fsm:turn_complete()
         end
     elseif fsm:is('ignoring') then
         if ignoreUntilTime <= currentTime then
@@ -82,6 +179,18 @@ function sysCall_actuation()
         end
     end
     
+
+
+    --[=====[
+    #     #####  ####### 
+   # #   #     #    #    
+  #   #  #          #    
+ #     # #          #    
+ ####### #          #    
+ #     # #     #    #    
+ #     #  #####     #    
+                         
+    --]=====]
     -- Initialize motor velocities
     local leftV = 0
     local rightV = 0
@@ -103,6 +212,12 @@ function sysCall_actuation()
             print("  - Slowing right motor")
         end
         
+    elseif fsm:is('turning') then
+        print("[TURNING] Performing 90° turn")
+        -- Apply precomputed differential wheel speeds for proper turning
+        leftV = precomputedTurnL
+        rightV = precomputedTurnR
+        
     elseif fsm:is('ignoring') then
         print("[IGNORING] Moving forward at full speed")
         leftV = speed
@@ -117,3 +232,17 @@ end
 function sysCall_cleanup() 
     simUI.destroy(ui)
 end 
+
+--[=====[
+ #     # ####### ### #       
+ #     #    #     #  #       
+ #     #    #     #  #       
+ #     #    #     #  #       
+ #     #    #     #  #       
+ #     #    #     #  #       
+  #####     #    ### ####### 
+                             
+--]=====]
+function speedChange_callback(ui,id,newVal)
+    speed=minMaxSpeed[1]+(minMaxSpeed[2]-minMaxSpeed[1])*newVal/100
+end
