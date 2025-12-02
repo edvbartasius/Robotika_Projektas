@@ -1,0 +1,119 @@
+"""
+Auto-generated GraphQL SDL describing the FSM used in `assets/line_following.lua`.
+
+This file contains:
+- State enum reflecting the FSM states
+- Event and Transition types
+- An `FSM` type plus basic `Query` and `Mutation` definitions
+- Example queries and mutations as comments
+
+FSM (from the Lua file):
+- initial: following
+- states: following, turning_away, wall_follow, searching
+- events/transitions:
+  - obstacle_detected: following -> turning_away
+  - front_clear:       turning_away -> wall_follow
+  - line_found:        wall_follow  -> following
+  - timeout:           wall_follow  -> searching
+  - line_found:        searching    -> following
+  - search_timeout:    searching    -> wall_follow
+"""
+
+"# FSM state names (uppercased for enum safety)"
+enum StateName {
+  FOLLOWING
+  TURNING_AWAY
+  WALL_FOLLOW
+  SEARCHING
+}
+
+"# An Event shows the name and allowed source states (from) and resulting state (to)"
+type Event {
+  name: String!
+  from: [StateName!]!
+  to: StateName!
+}
+
+"# A concrete Transition entry (useful for listing edges)
+# id is a simple identifier (e.g. event name + index)"
+type Transition {
+  id: ID!
+  event: String!
+  from: StateName!
+  to: StateName!
+}
+
+"# The FSM aggregate type"
+type FSM {
+  id: ID!
+  initial: StateName!
+  states: [StateName!]!
+  events: [Event!]!
+  transitions: [Transition!]!
+  currentState: StateName
+}
+
+type Query {
+  "# Get a single FSM by id"
+  fsm(id: ID!): FSM
+  "# List all FSMs"
+  fsms: [FSM!]
+  "# Convenience: list states"
+  states: [StateName!]
+  "# Convenience: list events"
+  events: [Event!]
+}
+
+type Mutation {
+  "# Trigger an event on an FSM; returns the FSM after transition (if any)"
+  triggerEvent(fsmId: ID!, eventName: String!): FSM
+  "# Force-set the FSM state (useful for testing)"
+  setState(fsmId: ID!, state: StateName!): FSM
+}
+
+"""
+Example usage (SDL comments):
+
+Query the FSM definition:
+
+{
+  fsm(id: "lineFollower") {
+    id
+    initial
+    states
+    currentState
+    events {
+      name
+      from
+      to
+    }
+    transitions {
+      id
+      event
+      from
+      to
+    }
+  }
+}
+
+Trigger an event (for example: obstacle_detected):
+
+mutation {
+  triggerEvent(fsmId: "lineFollower", eventName: "obstacle_detected") {
+    id
+    currentState
+  }
+}
+
+Example transition table (derived from `line_following.lua`):
+
+| id | event           | from          | to            |
+|----|-----------------|---------------|---------------|
+| t1 | obstacle_detected | FOLLOWING    | TURNING_AWAY  |
+| t2 | front_clear       | TURNING_AWAY | WALL_FOLLOW   |
+| t3 | line_found        | WALL_FOLLOW  | FOLLOWING     |
+| t4 | timeout           | WALL_FOLLOW  | SEARCHING     |
+| t5 | line_found        | SEARCHING    | FOLLOWING     |
+| t6 | search_timeout    | SEARCHING    | WALL_FOLLOW   |
+
+"""

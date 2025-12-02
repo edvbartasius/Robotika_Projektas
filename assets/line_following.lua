@@ -135,7 +135,7 @@ function sysCall_actuation()
                 if right then
                     leftV, rightV = speed, speed * 0.1
                 elseif left then
-                    leftV, rightV = speed, speed * 0.8
+                    leftV, rightV = speed * 0.1, speed
                 else
                     leftV, rightV = speed, speed
                 end
